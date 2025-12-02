@@ -73,5 +73,5 @@ pip install -r requirements.txt
 
 streamlit run app.py
 
-After you are done, close that window and open a new one and run the following:
+
 
