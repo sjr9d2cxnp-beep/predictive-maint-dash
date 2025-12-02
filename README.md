@@ -53,6 +53,22 @@ This dashboard is designed to plug into my broader lab:
 
 As I wire these together, the goal is an end-to-end demo that shows how connected operations tools create **operational clarity** for frontline teams and leadership.
 
+## Business Problems This Module Solves
+
+This module mirrors the real-world predictive maintenance workflows used in fleet, equipment, and industrial IoT environments:
+
+Reduce unplanned downtime by surfacing failing components early
+
+Prioritize maintenance work based on risk, not guesswork
+
+Give non-technical operators a clear, visual explanation of why something is failing
+
+Turn noisy telemetry (temperature, RPM, vibration, etc.) into a simple scoring model the business can act on
+
+Show leadership what’s happening across all assets at a glance
+
+This is the type of demo a Sales Engineer uses during discovery, proof-of-value, and technical validation cycles.
+
 To run:
 
 Open terminal
