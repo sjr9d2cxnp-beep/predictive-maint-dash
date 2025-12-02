@@ -75,5 +75,3 @@ streamlit run app.py
 
 After you are done, close that window and open a new one and run the following:
 
-cd ..
-Remove-Item -Recurse -Force "C:\Users\YOURPCUSERNAME\predictive-maint-dash"
