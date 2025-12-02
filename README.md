@@ -52,3 +52,28 @@ This dashboard is designed to plug into my broader lab:
 - Future: anomaly alerts + notifications + integrated “maintenance queue”
 
 As I wire these together, the goal is an end-to-end demo that shows how connected operations tools create **operational clarity** for frontline teams and leadership.
+
+To run:
+
+Open terminal
+
+Run the following commands:
+
+git clone https://github.com/sjr9d2cxnp-beep/predictive-maint-dash.git
+
+python -m venv .venv
+
+.venv\Scripts\activate
+
+If it is blocked, run this ONCE as an admin in Powershell and then try again:
+
+Set-ExecutionPolicy -ExecutionPolicyRemoteSigned -Scope CurrentUser
+
+pip install -r requirements.txt
+
+streamlit run app.py
+
+After you are done, close that window and open a new one and run the following:
+
+cd ..
+Remove-Item -Recurse -Force "C:\Users\YOURPCUSERNAME\predictive-maint-dash"
