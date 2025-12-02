@@ -107,7 +107,7 @@ def add_health_signals(df: pd.DataFrame) -> pd.DataFrame:
 # ---------- STREAMLIT UI ----------
 
 st.set_page_config(
-    page_title="Predictive Maintenance Lab",
+    page_title="Predictive Maintenance Dashboard",
     page_icon="🛠️",
     layout="wide",
 )
