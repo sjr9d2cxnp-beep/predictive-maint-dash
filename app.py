@@ -1,10 +1,13 @@
+import os
 import streamlit as st
 import pandas as pd
 import numpy as np
 import requests
 from datetime import datetime, timedelta
 
-API_URL = "http://127.0.0.1:8000/telemetry"
+# API URL: default to localhost for manual runs, override in Docker with API_URL env
+API_URL = os.getenv("API_URL", "http://127.0.0.1:8000/telemetry")
+
 
 
 # ---------- DATA HELPERS ----------
