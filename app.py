@@ -1,131 +1,47 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
 import requests
+from datetime import datetime, timedelta
+from streamlit_autorefresh import st_autorefresh
 
-# ---------------- CONFIG ----------------
+API_URL = "http://127.0.0.1:8000/telemetry"
 
-# If True, dashboard will try to pull live data from the OBD emulator API.
-# If the API is not reachable or returns no data, it will fall back to
-# simulated fleet data so the UI still works.
-USE_EMULATOR = True
-EMULATOR_URL = "http://127.0.0.1:8000/telemetry"  # change if API is hosted elsewhere
-
-
-# ------------- DATA SOURCES -------------
+# Auto-refresh every 15 seconds
+st_autorefresh(interval=15_000, key="fleet-auto-refresh")
 
 
-def load_emulator_data() -> pd.DataFrame:
-    """
-    Pull live telemetry from the OBD telemetry emulator.
+# ---------- DATA HELPERS ----------
 
-    Expected emulator JSON schema (list of dicts):
-        {
-            "ts": "...ISO timestamp...",
-            "vehicle_id": "corolla_2019",
-            "rpm": 1500,
-            "coolant_temp_c": 90,
-            "speed_mph": 45
-        }
-
-    This function maps that into the schema that the dashboard uses:
-        timestamp, vehicle_id, coolant_temp_f, intake_air_temp_f,
-        engine_rpm, boost_psi, vibration_score
-    """
-    try:
-        resp = requests.get(EMULATOR_URL, timeout=3)
-        resp.raise_for_status()
-        raw = resp.json()
-    except Exception as e:
-        # If anything goes wrong, return empty DF and let caller handle fallback
-        return pd.DataFrame()
-
-    if not raw:
-        return pd.DataFrame()
-
-    df = pd.DataFrame(raw)
-
-    # Basic safety: make sure required columns exist
-    required_cols = {"ts", "vehicle_id", "rpm", "coolant_temp_c", "speed_mph"}
-    if not required_cols.issubset(df.columns):
-        # Emulator isn't sending what we expect; treat as no data
-        return pd.DataFrame()
-
-    # Standardize types & names
-    df["timestamp"] = pd.to_datetime(df["ts"])
-    df["vehicle_id"] = df["vehicle_id"].fillna("Corolla-2019")
-
-    # Celsius → Fahrenheit
-    df["coolant_temp_f"] = df["coolant_temp_c"] * 9.0 / 5.0 + 32.0
-
-    # Derive intake temp roughly below coolant temp so it looks realistic
-    df["intake_air_temp_f"] = df["coolant_temp_f"] - 50.0
-
-    # Use real RPM directly
-    df["engine_rpm"] = df["rpm"]
-
-    # Make boost and vibration vaguely correlated with RPM / heat so it’s not random noise
-    rpm_centered = df["engine_rpm"] - df["engine_rpm"].rolling(30, min_periods=1).mean()
-    heat_excess = (df["coolant_temp_f"] - 210).clip(lower=0)
-
-    df["boost_psi"] = 10 + (rpm_centered / 800).clip(-5, 5)
-    df["vibration_score"] = (heat_excess / 40 + (rpm_centered / 2000)).clip(lower=0)
-    df["vibration_score"] = df["vibration_score"].round(3)
-
-    return df[
-        [
-            "timestamp",
-            "vehicle_id",
-            "coolant_temp_f",
-            "intake_air_temp_f",
-            "engine_rpm",
-            "boost_psi",
-            "vibration_score",
-        ]
-    ]
-
-
-def simulate_fleet_data(num_points: int = 200, num_vehicles: int = 4) -> pd.DataFrame:
-    """
-    Simulate time-series telemetry for a small fleet.
-
-    Metrics (roughly car / light-duty fleet style):
-      - coolant_temp_f (°F)
-      - intake_air_temp_f (°F)
-      - engine_rpm
-      - boost_psi
-      - vibration_score (0–1+)
-    """
+def simulate_fleet_data(num_points: int = 600, num_vehicles: int = 4) -> pd.DataFrame:
+    """Fallback: generate synthetic fleet data with the same schema as the live feed."""
     records = []
-    base_time = datetime.now() - timedelta(minutes=num_points)
-    timestamps = [base_time + timedelta(minutes=i) for i in range(num_points)]
+    base_time = datetime.now() - timedelta(seconds=num_points)
+    timestamps = [base_time + timedelta(seconds=i) for i in range(num_points)]
 
     for vehicle_id in range(1, num_vehicles + 1):
-        # baseline per vehicle
-        base_coolant = np.random.uniform(180, 215)
-        base_intake = np.random.uniform(90, 100)
-        base_rpm = np.random.uniform(1600, 2300)
-        base_boost = np.random.uniform(8, 14)
+        base_coolant = np.random.uniform(190, 210)
+        base_intake = np.random.uniform(80, 95)
+        base_rpm = np.random.uniform(1600, 2200)
+        base_speed = np.random.uniform(45, 65)
         base_vibration = np.random.uniform(0.25, 0.45)
 
-        # slow drifts to mimic developing issues
-        coolant_drift = np.random.uniform(-2, 8)
-        intake_drift = coolant_drift * 0.4
-        vibration_drift = np.random.uniform(0, 0.3)
+        coolant_drift = np.random.uniform(-1, 3)
+        intake_drift = coolant_drift * 0.5
+        vibration_drift = np.random.uniform(0, 0.15)
+
+        hours = 0.0
 
         for i, ts in enumerate(timestamps):
             progress = i / num_points
 
-            coolant = base_coolant + progress * coolant_drift + np.random.normal(0, 1.5)
-            intake = base_intake + progress * intake_drift + np.random.normal(0, 0.7)
-            rpm = base_rpm + np.random.normal(0, 180)
-            boost = base_boost + np.random.normal(0, 1.0)
-            vibration = (
-                base_vibration
-                + progress * vibration_drift
-                + abs(np.random.normal(0, 0.03))
-            )
+            coolant = base_coolant + progress * coolant_drift + np.random.normal(0, 0.6)
+            intake = base_intake + progress * intake_drift + np.random.normal(0, 0.4)
+            rpm = base_rpm + np.random.normal(0, 70)
+            speed = base_speed + np.random.normal(0, 3)
+            vibration = base_vibration + progress * vibration_drift + abs(np.random.normal(0, 0.02))
+
+            hours += 1.0 / 3600.0
 
             records.append(
                 {
@@ -134,51 +50,68 @@ def simulate_fleet_data(num_points: int = 200, num_vehicles: int = 4) -> pd.Data
                     "coolant_temp_f": round(coolant, 1),
                     "intake_air_temp_f": round(intake, 1),
                     "engine_rpm": int(rpm),
-                    "boost_psi": round(boost, 1),
+                    "speed_mph": round(speed, 1),
                     "vibration_score": round(vibration, 3),
+                    "engine_hours": round(hours, 2),
                 }
             )
 
     return pd.DataFrame(records)
 
 
-# --------- HEALTH / RISK LOGIC ---------
+def load_live_telemetry(api_url: str = API_URL) -> pd.DataFrame:
+    """Fetch recent telemetry points from the FastAPI service."""
+    try:
+        resp = requests.get(api_url, timeout=2)
+        resp.raise_for_status()
+        data = resp.json()
+        if not data:
+            return pd.DataFrame()
+
+        df = pd.DataFrame(data)
+        if "ts" in df.columns:
+            df["timestamp"] = pd.to_datetime(df["ts"])
+            df = df.drop(columns=["ts"])
+
+        return df
+    except Exception:
+        # If API is down or empty, caller will fall back to simulation.
+        return pd.DataFrame()
 
 
 def add_health_signals(df: pd.DataFrame) -> pd.DataFrame:
     """
     Add simple rule-based anomalies and a risk score.
 
-    This is intentionally transparent and interview-friendly:
-    easy to walk through on a whiteboard, not "mystery ML."
+    Intent: show thought process for predictive maintenance,
+    not build a PhD thesis ML model.
     """
     df = df.copy()
 
-    # basic thresholds
-    df["coolant_high"] = df["coolant_temp_f"] > 250
-    df["intake_high"] = df["intake_air_temp_f"] > 200
-    df["vibration_high"] = df["vibration_score"] > 5.0
+    # hard thresholds
+    df["coolant_high"] = df["coolant_temp_f"] > 240
+    df["intake_high"] = df["intake_air_temp_f"] > 180
+    df["vibration_high"] = df["vibration_score"] > 1.5
 
+    # rolling mean to detect creeping trends (10-minute window at 1 Hz)
     df = df.sort_values(["vehicle_id", "timestamp"])
-
-    # rolling averages for trend detection
     df["coolant_rolling"] = (
         df.groupby("vehicle_id")["coolant_temp_f"]
-        .rolling(window=15, min_periods=5)
+        .rolling(window=600, min_periods=60)
         .mean()
         .reset_index(0, drop=True)
     )
     df["intake_rolling"] = (
         df.groupby("vehicle_id")["intake_air_temp_f"]
-        .rolling(window=15, min_periods=5)
+        .rolling(window=600, min_periods=60)
         .mean()
         .reset_index(0, drop=True)
     )
 
-    df["coolant_trend_high"] = df["coolant_rolling"] > 220
+    df["coolant_trend_high"] = df["coolant_rolling"] > 225
     df["intake_trend_high"] = df["intake_rolling"] > 150
 
-    # rule-based risk score
+    # risk score: transparent and explainable
     df["risk_score"] = (
         df["coolant_high"].astype(int) * 3
         + df["coolant_trend_high"].astype(int) * 2
@@ -187,7 +120,7 @@ def add_health_signals(df: pd.DataFrame) -> pd.DataFrame:
         + df["vibration_high"].astype(int) * 3
     )
 
-    def classify_status(score: int) -> str:
+    def classify(score: int) -> str:
         if score >= 6:
             return "High"
         elif score >= 3:
@@ -195,11 +128,25 @@ def add_health_signals(df: pd.DataFrame) -> pd.DataFrame:
         else:
             return "Low"
 
-    df["risk_band"] = df["risk_score"].apply(classify_status)
+    df["risk_band"] = df["risk_score"].apply(classify)
     return df
 
 
-# --------------- STREAMLIT UI ---------------
+def load_data() -> tuple[pd.DataFrame, str]:
+    """Try live data, fall back to simulation. Return (df, source)."""
+    live_df = load_live_telemetry()
+    if live_df.empty:
+        df_raw = simulate_fleet_data()
+        source = "simulated"
+    else:
+        df_raw = live_df
+        source = "live"
+
+    df = add_health_signals(df_raw)
+    return df, source
+
+
+# ---------- STREAMLIT UI ----------
 
 st.set_page_config(
     page_title="Predictive Maintenance Dashboard",
@@ -208,8 +155,9 @@ st.set_page_config(
 )
 
 st.title("Predictive Maintenance Lab")
+
 st.caption(
-    "Live / simulated fleet telemetry → simple risk scoring → maintenance priorities. "
+    "Live / simulated fleet telemetry → rule-based risk scoring → maintenance priorities. "
     "MVP to show how I think about predictive maintenance and asset health."
 )
 
@@ -218,41 +166,31 @@ with st.expander("What this dashboard is (and isn’t)", expanded=False):
         """
         **This is an MVP demo**, not a production system:
 
-        - Data can come from a **live OBD-style emulator** or from **synthetic fleet signals**.
+        - Data can come from a **live FastAPI telemetry feed** (OBD-II emulator) or a simulated fleet.
         - Risk is scored using **transparent rules**, not a black-box model.
-        - The goal is to show how to:
-            - ingest and structure time-series telemetry
-            - derive health indicators and risk bands
-            - surface a **maintenance priority list** for operators.
+        - The focus is on:
+            - ingesting and structuring time-series signals
+            - deriving health indicators and risk bands
+            - surfacing a **maintenance priority list**.
 
-        In a real deployment, this would plug into actual OBD-II / telematics feeds or equipment sensors.
+        In a real deployment, the live API would sit behind IoT gateways / telematics devices
+        and feed real vehicle or equipment data.
         """
     )
 
-# Source selector (mostly for debugging/demo)
-source_label = "Live emulator" if USE_EMULATOR else "Simulated fleet"
-st.sidebar.markdown(f"**Data source:** {source_label}")
-
-# pull data
-if USE_EMULATOR:
-    df_raw = load_emulator_data()
-    if df_raw.empty:
-        st.sidebar.warning("No emulator data available, falling back to simulated fleet.")
-        df_raw = simulate_fleet_data()
-else:
-    df_raw = simulate_fleet_data()
-
-if df_raw.empty:
-    st.error("No telemetry available from any source.")
+df, source = load_data()
+if df.empty:
+    st.error("No telemetry data available yet.")
     st.stop()
 
-df = add_health_signals(df_raw)
+vehicle_ids = sorted(df["vehicle_id"].unique())
+latest_ts = df["timestamp"].max()
 
-# ---------- SIDEBAR FILTERS ----------
+st.info(f"Data source: **{source}** • Last sample: `{latest_ts}`")
 
+# sidebar filters
 st.sidebar.header("Filters")
 
-vehicle_ids = sorted(df["vehicle_id"].unique())
 selected_vehicle = st.sidebar.selectbox("Select unit", vehicle_ids)
 
 risk_filter = st.sidebar.multiselect(
@@ -262,12 +200,12 @@ risk_filter = st.sidebar.multiselect(
 )
 
 # subset based on filters
-filtered_df = df[df["vehicle_id"] == selected_vehicle].copy()
+unit_df = df[df["vehicle_id"] == selected_vehicle].sort_values("timestamp")
+
 fleet_latest = (
     df.sort_values("timestamp")
     .groupby("vehicle_id")
     .tail(1)
-    .sort_values("risk_score", ascending=False)
 )
 
 if risk_filter:
@@ -283,16 +221,10 @@ with col1:
     st.metric("Units monitored", value=len(vehicle_ids))
 
 with col2:
-    st.metric(
-        "High-risk units",
-        value=int((fleet_latest["risk_band"] == "High").sum()),
-    )
+    st.metric("High-risk units", value=int((fleet_latest["risk_band"] == "High").sum()))
 
 with col3:
-    st.metric(
-        "Medium-risk units",
-        value=int((fleet_latest["risk_band"] == "Medium").sum()),
-    )
+    st.metric("Medium-risk units", value=int((fleet_latest["risk_band"] == "Medium").sum()))
 
 st.markdown("### Maintenance priority list")
 
@@ -306,7 +238,6 @@ priority_cols = [
     "timestamp",
 ]
 
-# sort by “business priority”
 fleet_latest = fleet_latest.sort_values(
     ["risk_score", "coolant_temp_f", "intake_air_temp_f", "vehicle_id"],
     ascending=[False, False, False, True],
@@ -317,11 +248,10 @@ st.dataframe(
     use_container_width=True,
 )
 
-# ---------- DETAIL FOR SELECTED UNIT ----------
+# ---------- DETAILED VIEW FOR SELECTED UNIT ----------
 
 st.markdown(f"### Unit detail: `{selected_vehicle}`")
 
-unit_df = filtered_df.sort_values("timestamp")
 latest = unit_df.iloc[-1]
 
 c1, c2, c3, c4 = st.columns(4)
@@ -334,19 +264,31 @@ with c3:
 with c4:
     st.metric("Vibration score", f"{latest['vibration_score']:.2f}")
 
+c5, c6 = st.columns(2)
+with c5:
+    st.metric("Engine RPM", f"{latest['engine_rpm']}")
+with c6:
+    st.metric("Engine hours", f"{latest['engine_hours']:.2f}")
+
 st.markdown("#### Trend lines")
+
+# Slight smoothing for nicer-looking cruising lines
+plot_df = unit_df.set_index("timestamp").copy()
+plot_df["coolant_temp_smooth"] = plot_df["coolant_temp_f"].rolling(window=20, min_periods=1).mean()
+plot_df["intake_air_smooth"] = plot_df["intake_air_temp_f"].rolling(window=20, min_periods=1).mean()
+plot_df["vibration_smooth"] = plot_df["vibration_score"].rolling(window=20, min_periods=1).mean()
 
 chart_col1, chart_col2 = st.columns(2)
 
 with chart_col1:
     st.line_chart(
-        unit_df.set_index("timestamp")[["coolant_temp_f", "intake_air_temp_f"]],
+        plot_df[["coolant_temp_smooth", "intake_air_smooth"]],
         height=260,
     )
 
 with chart_col2:
     st.line_chart(
-        unit_df.set_index("timestamp")[["vibration_score"]],
+        plot_df[["vibration_smooth"]],
         height=260,
     )
 
@@ -359,11 +301,12 @@ st.dataframe(
             "coolant_temp_f",
             "intake_air_temp_f",
             "engine_rpm",
-            "boost_psi",
+            "speed_mph",
             "vibration_score",
+            "engine_hours",
             "risk_score",
             "risk_band",
         ]
-    ].tail(50),
+    ].tail(100),
     use_container_width=True,
 )
