@@ -10,32 +10,56 @@ API_URL = "http://127.0.0.1:8000/telemetry"
 # ---------- DATA HELPERS ----------
 
 def simulate_fleet_data(num_points: int = 600, num_vehicles: int = 4) -> pd.DataFrame:
-    """Fallback: generate synthetic fleet data with the same schema as the live feed."""
+    """
+    Fallback: generate synthetic fleet data with the same schema as the live feed,
+    tuned to feel like light-duty vehicles cruising at highway speeds.
+    """
     records = []
     base_time = datetime.now() - timedelta(seconds=num_points)
     timestamps = [base_time + timedelta(seconds=i) for i in range(num_points)]
 
     for vehicle_id in range(1, num_vehicles + 1):
-        base_coolant = np.random.uniform(190, 210)
-        base_intake = np.random.uniform(80, 95)
-        base_rpm = np.random.uniform(1600, 2200)
-        base_speed = np.random.uniform(45, 65)
+        # realistic cruise baselines
+        base_coolant = np.random.uniform(188, 202)     # around 195°F
+        base_intake = np.random.uniform(60, 70)        # ambient-ish
+        base_rpm = np.random.uniform(1850, 2050)
+        base_speed = np.random.uniform(65, 75)
         base_vibration = np.random.uniform(0.25, 0.45)
 
-        coolant_drift = np.random.uniform(-1, 3)
-        intake_drift = coolant_drift * 0.5
-        vibration_drift = np.random.uniform(0, 0.15)
+        coolant_drift = np.random.uniform(-0.5, 2.0)
+        intake_drift = coolant_drift * 0.4
+        vibration_drift = np.random.uniform(0.0, 0.10)
 
         hours = 0.0
 
         for i, ts in enumerate(timestamps):
             progress = i / num_points
 
-            coolant = base_coolant + progress * coolant_drift + np.random.normal(0, 0.6)
-            intake = base_intake + progress * intake_drift + np.random.normal(0, 0.4)
-            rpm = base_rpm + np.random.normal(0, 70)
-            speed = base_speed + np.random.normal(0, 3)
-            vibration = base_vibration + progress * vibration_drift + abs(np.random.normal(0, 0.02))
+            rpm = base_rpm + np.random.normal(0, 60)
+            rpm = np.clip(rpm, 1800, 2100)
+
+            speed = base_speed + np.random.normal(0, 2.0)
+            speed = np.clip(speed, 60, 80)
+
+            coolant = base_coolant + progress * coolant_drift + np.random.normal(0, 1.0)
+            intake = (
+                base_intake
+                + progress * intake_drift
+                + (rpm - 1950) / 80.0
+                + np.random.normal(0, 0.8)
+            )
+
+            vibration = (
+                base_vibration
+                + progress * vibration_drift
+                + abs(np.random.normal(0, 0.02))
+            )
+
+            # occasional synthetic overheat to match emulator behavior
+            if np.random.rand() < 0.02:
+                coolant = np.random.uniform(225, 235)
+                intake += np.random.uniform(8, 15)
+                vibration += 0.7
 
             hours += 1.0 / 3600.0
 
@@ -77,20 +101,25 @@ def load_live_telemetry(api_url: str = API_URL) -> pd.DataFrame:
 
 def add_health_signals(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Add simple rule-based anomalies and a risk score.
-
-    Intent: show thought process for predictive maintenance,
-    not build a PhD thesis ML model.
+    Add rule-based anomalies and a risk score tuned for realistic Corolla-like telemetry.
     """
     df = df.copy()
 
-    # hard thresholds
-    df["coolant_high"] = df["coolant_temp_f"] > 240
-    df["intake_high"] = df["intake_air_temp_f"] > 180
-    df["vibration_high"] = df["vibration_score"] > 1.5
+    # --- HARD THRESHOLDS (per-sample) ---
+    # normal coolant ~195°F; 220+ is bad, 230 is definitely a problem
+    df["coolant_high"] = df["coolant_temp_f"] > 220
 
-    # rolling mean to detect creeping trends (10-minute window at 1 Hz)
+    # intake should live around 60–80°F; 120+ is very abnormal
+    df["intake_high"] = df["intake_air_temp_f"] > 120
+
+    # vibration baseline ~0.3; 1.0+ indicates roughness
+    df["vibration_high"] = df["vibration_score"] > 1.0
+
+    # --- TREND FLAGS (rolling mean) ---
+
     df = df.sort_values(["vehicle_id", "timestamp"])
+
+    # about 10 minutes at 1 Hz
     df["coolant_rolling"] = (
         df.groupby("vehicle_id")["coolant_temp_f"]
         .rolling(window=600, min_periods=60)
@@ -104,10 +133,12 @@ def add_health_signals(df: pd.DataFrame) -> pd.DataFrame:
         .reset_index(0, drop=True)
     )
 
-    df["coolant_trend_high"] = df["coolant_rolling"] > 225
-    df["intake_trend_high"] = df["intake_rolling"] > 150
+    # persistent coolant > 210°F is suspicious even if individual spikes are lower
+    df["coolant_trend_high"] = df["coolant_rolling"] > 210
+    df["intake_trend_high"] = df["intake_rolling"] > 90
 
-    # risk score: transparent and explainable
+    # --- RISK SCORE ---
+
     df["risk_score"] = (
         df["coolant_high"].astype(int) * 3
         + df["coolant_trend_high"].astype(int) * 2
