@@ -3,12 +3,8 @@ import pandas as pd
 import numpy as np
 import requests
 from datetime import datetime, timedelta
-from streamlit_autorefresh import st_autorefresh
 
 API_URL = "http://127.0.0.1:8000/telemetry"
-
-# Auto-refresh every 15 seconds
-st_autorefresh(interval=15_000, key="fleet-auto-refresh")
 
 
 # ---------- DATA HELPERS ----------
@@ -152,6 +148,14 @@ st.set_page_config(
     page_title="Predictive Maintenance Dashboard",
     page_icon="🛠️",
     layout="wide",
+)
+
+# Simple auto-refresh every 15 seconds
+st.markdown(
+    """
+    <meta http-equiv="refresh" content="15">
+    """,
+    unsafe_allow_html=True,
 )
 
 st.title("Predictive Maintenance Lab")
